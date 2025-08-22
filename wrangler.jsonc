@@ -9,6 +9,19 @@
   "vars": {
     "VALUE_FROM_CLOUDFLARE": "Hello from Hono/CF"
   },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "ai-dataset-creator-db",
+      "database_id": "877437ab-a22d-41ae-8d5b-a07fa611aba6"
+    }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "STORAGE",
+      "bucket_name": "ai-dataset-creator-storage"
+    }
+  ],
   "observability": {
     "enabled": true
   },

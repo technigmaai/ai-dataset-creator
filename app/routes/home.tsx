@@ -1,10 +1,12 @@
 import type { Route } from "./+types/home";
-import { Welcome } from "../welcome/welcome";
+import { Header } from "../components/layout/header";
+import { Sidebar } from "../components/layout/sidebar";
+import { Dashboard } from "../components/dashboard/dashboard";
 
 export function meta({}: Route.MetaArgs) {
   return [
-    { title: "New React Router App" },
-    { name: "description", content: "Welcome to React Router!" },
+    { title: "AI Dataset Creator - Dashboard" },
+    { name: "description", content: "Transform documents into high-quality AI training datasets" },
   ];
 }
 
@@ -13,5 +15,15 @@ export function loader({ context }: Route.LoaderArgs) {
 }
 
 export default function Home({ loaderData }: Route.ComponentProps) {
-  return <Welcome message={loaderData.message} />;
+  return (
+    <div className="h-screen flex flex-col">
+      <Header />
+      <div className="flex flex-1 overflow-hidden">
+        <Sidebar />
+        <main className="flex-1 overflow-y-auto">
+          <Dashboard />
+        </main>
+      </div>
+    </div>
+  );
 }

@@ -17,11 +17,17 @@
     "publish": true
   },
   "dependencies": {
+    "@types/uuid": "^10.0.0",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
     "hono": "4.8.2",
     "isbot": "5.1.26",
     "react": "19.0.0",
     "react-dom": "19.0.0",
-    "react-router": "7.6.3"
+    "react-router": "7.6.3",
+    "tailwind-merge": "^2.5.5",
+    "uuid": "^11.0.3",
+    "zod": "^3.24.1"
   },
   "devDependencies": {
     "@cloudflare/vite-plugin": "1.7.5",
@@ -41,8 +47,8 @@
     "build": "react-router build",
     "cf-typegen": "wrangler types",
     "deploy": "npm run build && wrangler deploy",
-    "dev": "react-router dev",
-    "preview": "npm run build && vite preview",
+    "dev": "react-router dev --host 0.0.0.0",
+    "preview": "npm run build && vite preview --host 0.0.0.0",
     "typecheck": "npm run cf-typegen && react-router typegen && tsc -b"
   }
 }
