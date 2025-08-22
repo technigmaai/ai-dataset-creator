@@ -861,26 +861,6 @@ app.post('/api/projects/:projectId/documents/:documentId/generate', async (c) =>
   }
 });
 
-// Catch-all for React Router (disabled for API-only mode)
-// app.get("*", (c) => {
-//   const requestHandler = createRequestHandler(
-//     () => import("virtual:react-router/server-build"),
-//     import.meta.env.MODE,
-//   );
-
-//   return requestHandler(c.req.raw, {
-//     cloudflare: { env: c.env, ctx: c.executionCtx },
-//   });
-// });
-
-// Simple catch-all for API testing
-app.get("*", (c) => {
-  return c.json({ 
-    success: false, 
-    error: "API endpoint not found",
-    path: c.req.path,
-    method: c.req.method
-  }, 404);
-});
+// No catch-all route - let the frontend handle non-API routes
 
 export default app;
