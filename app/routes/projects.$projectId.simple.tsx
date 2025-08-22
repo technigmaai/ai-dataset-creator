@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import type { Route } from "./+types/projects.$projectId.simple";
+import { DatasetGenerator } from "../components/datasets/dataset-generator";
 
 export function meta({ params }: Route.MetaArgs) {
   return [
@@ -21,6 +22,8 @@ export default function ProjectDetailSimple({ loaderData, params }: Route.Compon
   const [isEditingSettings, setIsEditingSettings] = useState(false);
   const [settingsForm, setSettingsForm] = useState({ name: "", description: "" });
   const [savingSettings, setSavingSettings] = useState(false);
+  const [showDatasetGenerator, setShowDatasetGenerator] = useState(false);
+  const [selectedDocumentForGeneration, setSelectedDocumentForGeneration] = useState<any>(null);
 
   useEffect(() => {
     const loadData = async () => {
@@ -200,6 +203,17 @@ export default function ProjectDetailSimple({ loaderData, params }: Route.Compon
     }
   };
 
+  const handleGenerateDataset = (document: any) => {
+    setSelectedDocumentForGeneration(document);
+    setShowDatasetGenerator(true);
+  };
+
+  const handleGenerationComplete = (dataset: any) => {
+    setShowDatasetGenerator(false);
+    setSelectedDocumentForGeneration(null);
+    alert(`Dataset "${dataset.name}" generated successfully with ${dataset.total_examples} examples!`);
+  };
+
   if (loading) {
     return (
       <div className="p-8">
@@ -298,6 +312,12 @@ export default function ProjectDetailSimple({ loaderData, params }: Route.Compon
                       </div>
                     </div>
                     <div className="flex space-x-2">
+                      <button
+                        onClick={() => handleGenerateDataset(document)}
+                        className="bg-blue-500 text-white px-3 py-1 rounded text-sm hover:bg-blue-600"
+                      >
+                        🤖 Generate Dataset
+                      </button>
                       <button
                         onClick={() => handleDeleteDocument(document.id)}
                         className="bg-red-500 text-white px-3 py-1 rounded text-sm hover:bg-red-600"
