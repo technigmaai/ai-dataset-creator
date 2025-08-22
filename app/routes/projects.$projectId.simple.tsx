@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import type { Route } from "./+types/projects.$projectId.simple";
 import { DatasetGenerator } from "../components/datasets/dataset-generator";
+import { DatasetViewer } from "../components/datasets/dataset-viewer";
 
 export function meta({ params }: Route.MetaArgs) {
   return [
@@ -24,6 +25,10 @@ export default function ProjectDetailSimple({ loaderData, params }: Route.Compon
   const [savingSettings, setSavingSettings] = useState(false);
   const [showDatasetGenerator, setShowDatasetGenerator] = useState(false);
   const [selectedDocumentForGeneration, setSelectedDocumentForGeneration] = useState<any>(null);
+  const [datasets, setDatasets] = useState<any[]>([]);
+  const [showDatasets, setShowDatasets] = useState(false);
+  const [showDatasetViewer, setShowDatasetViewer] = useState(false);
+  const [selectedDatasetId, setSelectedDatasetId] = useState<string | null>(null);
 
   useEffect(() => {
     const loadData = async () => {
@@ -47,6 +52,15 @@ export default function ProjectDetailSimple({ loaderData, params }: Route.Compon
           const docsResult = await docsResponse.json();
           if (docsResult.success) {
             setDocuments(docsResult.data || []);
+          }
+        }
+
+        // Load datasets
+        const datasetsResponse = await fetch(`/api/projects/${params.projectId}/datasets`);
+        if (datasetsResponse.ok) {
+          const datasetsResult = await datasetsResponse.json();
+          if (datasetsResult.success) {
+            setDatasets(datasetsResult.data || []);
           }
         }
       } catch (error) {
@@ -203,15 +217,54 @@ export default function ProjectDetailSimple({ loaderData, params }: Route.Compon
     }
   };
 
-  const handleGenerateDataset = (document: any) => {
-    setSelectedDocumentForGeneration(document);
+  const handleGenerateDataset = (document?: any) => {
+    setSelectedDocumentForGeneration(document || null);
     setShowDatasetGenerator(true);
   };
 
   const handleGenerationComplete = (dataset: any) => {
+    // Refresh datasets list
+    loadDatasets();
+    // Close the generator
     setShowDatasetGenerator(false);
     setSelectedDocumentForGeneration(null);
     alert(`Dataset "${dataset.name}" generated successfully with ${dataset.total_examples} examples!`);
+  };
+
+  const handleViewDataset = (datasetId: string) => {
+    setSelectedDatasetId(datasetId);
+    setShowDatasetViewer(true);
+  };
+
+  const handleCloseDatasetViewer = () => {
+    setShowDatasetViewer(false);
+    setSelectedDatasetId(null);
+    // Refresh datasets in case one was deleted
+    loadDatasets();
+  };
+
+  const handleDeleteDataset = async (datasetId: string, datasetName: string) => {
+    if (!confirm(`Are you sure you want to delete the dataset "${datasetName}"? This action cannot be undone.`)) {
+      return;
+    }
+
+    try {
+      const response = await fetch(`/api/projects/${params.projectId}/datasets/${datasetId}`, {
+        method: 'DELETE'
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        alert('Dataset deleted successfully');
+        loadDatasets(); // Refresh the datasets list
+      } else {
+        alert(`Failed to delete dataset: ${data.error}`);
+      }
+    } catch (error) {
+      console.error('Delete error:', error);
+      alert('Failed to delete dataset');
+    }
   };
 
   if (loading) {
@@ -278,9 +331,22 @@ export default function ProjectDetailSimple({ loaderData, params }: Route.Compon
         
         {/* Document List */}
         <div className="space-y-4">
-          <h3 className="text-lg font-semibold">
-            Uploaded Documents ({documents.length})
-          </h3>
+          <div className="flex justify-between items-center">
+            <h3 className="text-lg font-semibold">
+              Uploaded Documents ({documents.length})
+            </h3>
+            {documents.length > 0 && (
+              <button 
+                onClick={() => handleGenerateDataset()}
+                className="bg-purple-500 text-white px-4 py-2 rounded text-sm hover:bg-purple-600"
+              >
+                {documents.length === 1 
+                  ? '🚀 Generate Dataset' 
+                  : `🚀 Generate from All ${documents.length} Docs`
+                }
+              </button>
+            )}
+          </div>
           
           {documents.length === 0 ? (
             <div className="text-center py-8">
@@ -335,11 +401,81 @@ export default function ProjectDetailSimple({ loaderData, params }: Route.Compon
       
       <div className="grid gap-4 md:grid-cols-2 mt-6">
         <div className="bg-white border rounded-lg p-6">
-          <h3 className="text-lg font-semibold mb-2">🗂️ Generated Datasets</h3>
-          <p className="text-gray-600">No datasets generated yet</p>
-          <button className="mt-3 bg-purple-500 text-white px-4 py-2 rounded hover:bg-purple-600">
-            Generate Dataset
-          </button>
+          <div className="flex justify-between items-center mb-4">
+            <h3 className="text-lg font-semibold">🗂️ Generated Datasets ({datasets.length})</h3>
+            <button 
+              onClick={() => setShowDatasets(!showDatasets)}
+              className="text-blue-600 hover:text-blue-800 text-sm"
+            >
+              {showDatasets ? 'Hide' : 'Show All'}
+            </button>
+          </div>
+          
+          {datasets.length === 0 ? (
+            <div className="text-center py-4">
+              <div className="text-2xl mb-2">📊</div>
+              <p className="text-gray-600">No datasets generated yet</p>
+              <p className="text-sm text-gray-500 mt-1">
+                Upload documents and use "Generate Dataset" to create training data
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {(showDatasets ? datasets : datasets.slice(0, 3)).map((dataset: any) => (
+                <div key={dataset.id} className="p-3 border rounded-lg bg-gray-50">
+                  <div className="flex justify-between items-start mb-2">
+                    <h4 className="font-medium text-sm">{dataset.name}</h4>
+                    <span className={`px-2 py-1 text-xs rounded ${
+                      dataset.status === 'completed' ? 'bg-green-100 text-green-800' : 
+                      dataset.status === 'failed' ? 'bg-red-100 text-red-800' :
+                      'bg-yellow-100 text-yellow-800'
+                    }`}>
+                      {dataset.status}
+                    </span>
+                  </div>
+                  <div className="text-xs text-gray-600 space-y-1">
+                    <div className="flex justify-between">
+                      <span>Type:</span>
+                      <span className="font-medium capitalize">{dataset.dataset_type}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>Examples:</span>
+                      <span className="font-medium">{dataset.total_examples}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>Quality:</span>
+                      <span className="font-medium">{(dataset.quality_score * 100).toFixed(0)}%</span>
+                    </div>
+                  </div>
+                  <div className="mt-2 flex space-x-2">
+                    <button 
+                      onClick={() => handleViewDataset(dataset.id)}
+                      className="text-xs bg-blue-500 text-white px-2 py-1 rounded hover:bg-blue-600"
+                    >
+                      👁️ View & Export
+                    </button>
+                    <button 
+                      onClick={() => handleDeleteDataset(dataset.id, dataset.name)}
+                      className="text-xs bg-red-500 text-white px-2 py-1 rounded hover:bg-red-600"
+                    >
+                      🗑️ Delete
+                    </button>
+                  </div>
+                </div>
+              ))}
+              
+              {!showDatasets && datasets.length > 3 && (
+                <div className="text-center">
+                  <button 
+                    onClick={() => setShowDatasets(true)}
+                    className="text-sm text-blue-600 hover:text-blue-800"
+                  >
+                    +{datasets.length - 3} more datasets...
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
         </div>
         
         <div className="bg-white border rounded-lg p-6">
@@ -350,8 +486,14 @@ export default function ProjectDetailSimple({ loaderData, params }: Route.Compon
               <span className="font-medium">{documents.length}</span>
             </div>
             <div className="flex justify-between">
-              <span>Generated Examples:</span>
-              <span className="font-medium">0</span>
+              <span>Generated Datasets:</span>
+              <span className="font-medium">{datasets.length}</span>
+            </div>
+            <div className="flex justify-between">
+              <span>Total Examples:</span>
+              <span className="font-medium">
+                {datasets.reduce((sum: number, dataset: any) => sum + (dataset.total_examples || 0), 0)}
+              </span>
             </div>
             <div className="flex justify-between">
               <span>Total Size:</span>
@@ -458,7 +600,84 @@ export default function ProjectDetailSimple({ loaderData, params }: Route.Compon
           </div>
         )}
       </div>
+
+      {/* Dataset Generator Modal/Section */}
+      {showDatasetGenerator && (
+        <div className="mt-8">
+          <div className="bg-white border-2 border-blue-200 rounded-lg p-1">
+            <div className="flex justify-between items-center mb-4 bg-blue-50 p-4 rounded-t-lg">
+              <h3 className="text-lg font-semibold text-blue-800">
+                🤖 AI Dataset Generation
+              </h3>
+              <button
+                onClick={() => setShowDatasetGenerator(false)}
+                className="text-blue-600 hover:text-blue-800 text-xl font-bold"
+              >
+                ×
+              </button>
+            </div>
+            <div className="p-4">
+              {selectedDocumentForGeneration ? (
+                <DatasetGenerator
+                  projectId={params.projectId!}
+                  documentId={selectedDocumentForGeneration.id}
+                  documentName={selectedDocumentForGeneration.original_filename}
+                  onGenerationComplete={handleGenerationComplete}
+                />
+              ) : (
+                <div>
+                  <div className="mb-6 p-4 bg-purple-50 border border-purple-200 rounded-lg">
+                    <h4 className="font-semibold text-purple-800 mb-2">
+                      🚀 Project-Level Dataset Generation
+                    </h4>
+                    <p className="text-purple-700 text-sm">
+                      Generate a combined dataset from all {documents.length} documents in this project.
+                      This will create a comprehensive training dataset using content from all uploaded files.
+                    </p>
+                  </div>
+                  
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+                    {documents.slice(0, 4).map((doc: any) => (
+                      <div key={doc.id} className="p-3 bg-gray-50 border rounded-lg">
+                        <div className="text-sm font-medium">{doc.original_filename}</div>
+                        <div className="text-xs text-gray-600">
+                          {doc.file_type.toUpperCase()} • {Math.round(doc.file_size / 1024)} KB
+                        </div>
+                      </div>
+                    ))}
+                    {documents.length > 4 && (
+                      <div className="p-3 bg-gray-100 border rounded-lg text-center">
+                        <div className="text-sm text-gray-600">
+                          +{documents.length - 4} more documents
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                  
+                  <DatasetGenerator
+                    projectId={params.projectId!}
+                    documentId="project-level"
+                    documentName={`All ${documents.length} documents in project`}
+                    onGenerationComplete={handleGenerationComplete}
+                    isProjectLevel={true}
+                    documents={documents}
+                  />
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
       
+      {/* Dataset Viewer Modal */}
+      {showDatasetViewer && selectedDatasetId && (
+        <DatasetViewer
+          projectId={params.projectId!}
+          datasetId={selectedDatasetId}
+          onClose={handleCloseDatasetViewer}
+        />
+      )}
+
       <div className="mt-6">
         <button 
           onClick={() => window.history.back()}

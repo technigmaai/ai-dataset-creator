@@ -46,7 +46,7 @@ export interface ExampleMetadata {
   taskType?: string;
   difficulty?: string;
   confidence?: number;
-  traitsDemo nstrated?: string[];
+  traitsDemonstrated?: string[];
   keyPoints?: string[];
   [key: string]: any;
 }
@@ -303,7 +303,7 @@ export class DatasetGenerator {
                   output: conv.character,
                   metadata: {
                     scenario: conv.scenario,
-                    traitsDemo nstrated: conv.traits_demonstrated,
+                    traitsDemonstrated: conv.traits_demonstrated,
                     characterProfile: parsed.character_profile
                   },
                   sourceChunkId,

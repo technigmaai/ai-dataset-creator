@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
-import { createRequestHandler } from "react-router";
+// import { createRequestHandler } from "react-router"; // Disabled for API-only mode
 import { DatabaseManager } from "../app/lib/database";
 import { AIServiceManager } from "../app/lib/ai-service";
 import { 
@@ -13,6 +13,7 @@ import {
   GenerationJobRepository 
 } from "../app/lib/repositories";
 import { WorkersDocumentParser, WorkersTextChunker } from "../app/lib/document-parser-workers";
+import { DatasetGenerator } from "../app/lib/dataset-generator";
 import type { Env } from "../worker-configuration";
 
 const app = new Hono<{ Bindings: Env }>();
@@ -388,6 +389,162 @@ app.get('/api/projects/:projectId/datasets', async (c) => {
   }
 });
 
+// Get individual dataset with examples
+app.get('/api/projects/:projectId/datasets/:datasetId', async (c) => {
+  try {
+    const projectId = c.req.param('projectId');
+    const datasetId = c.req.param('datasetId');
+    const datasetRepo = c.get('datasetRepo') as DatasetRepository;
+    const exampleRepo = c.get('exampleRepo') as DatasetExampleRepository;
+    
+    // Get dataset
+    const dataset = await datasetRepo.findById(datasetId);
+    if (!dataset || dataset.project_id !== projectId) {
+      return c.json({ success: false, error: 'Dataset not found' }, 404);
+    }
+    
+    // Get examples
+    const examplesResult = await exampleRepo.findByDatasetId(datasetId);
+    
+    return c.json({ 
+      success: true, 
+      data: { 
+        ...dataset, 
+        examples: examplesResult.items
+      } 
+    });
+  } catch (error) {
+    console.error('Error fetching dataset:', error);
+    return c.json({ success: false, error: 'Failed to fetch dataset' }, 500);
+  }
+});
+
+// Delete dataset
+app.delete('/api/projects/:projectId/datasets/:datasetId', async (c) => {
+  try {
+    const projectId = c.req.param('projectId');
+    const datasetId = c.req.param('datasetId');
+    const datasetRepo = c.get('datasetRepo') as DatasetRepository;
+    const exampleRepo = c.get('exampleRepo') as DatasetExampleRepository;
+    
+    // Check if dataset exists and belongs to project
+    const dataset = await datasetRepo.findById(datasetId);
+    if (!dataset || dataset.project_id !== projectId) {
+      return c.json({ success: false, error: 'Dataset not found' }, 404);
+    }
+    
+    // Delete all examples first
+    const examplesResult = await exampleRepo.findByDatasetId(datasetId);
+    for (const example of examplesResult.items) {
+      await exampleRepo.delete(example.id);
+    }
+    
+    // Delete the dataset
+    const deleted = await datasetRepo.delete(datasetId);
+    
+    if (deleted) {
+      return c.json({ 
+        success: true, 
+        message: `Dataset "${dataset.name}" deleted successfully` 
+      });
+    } else {
+      return c.json({ success: false, error: 'Failed to delete dataset from database' }, 500);
+    }
+  } catch (error) {
+    console.error('Error deleting dataset:', error);
+    return c.json({ success: false, error: 'Failed to delete dataset' }, 500);
+  }
+});
+
+// Export dataset in different formats
+app.get('/api/projects/:projectId/datasets/:datasetId/export/:format', async (c) => {
+  try {
+    const projectId = c.req.param('projectId');
+    const datasetId = c.req.param('datasetId');
+    const format = c.req.param('format');
+    const datasetRepo = c.get('datasetRepo') as DatasetRepository;
+    const exampleRepo = c.get('exampleRepo') as DatasetExampleRepository;
+    
+    // Validate format
+    if (!['json', 'jsonl', 'csv'].includes(format)) {
+      return c.json({ success: false, error: 'Invalid export format. Use json, jsonl, or csv' }, 400);
+    }
+    
+    // Get dataset
+    const dataset = await datasetRepo.findById(datasetId);
+    if (!dataset || dataset.project_id !== projectId) {
+      return c.json({ success: false, error: 'Dataset not found' }, 404);
+    }
+    
+    // Get examples
+    const examplesResult = await exampleRepo.findByDatasetId(datasetId);
+    
+    if (examplesResult.items.length === 0) {
+      return c.json({ success: false, error: 'No examples found in dataset' }, 400);
+    }
+    
+    let content: string;
+    let mimeType: string;
+    let filename: string;
+    
+    const exportData = examplesResult.items.map(example => ({
+      input: example.input,
+      output: example.output,
+      metadata: example.metadata || {},
+      quality_score: example.quality_score
+    }));
+    
+    switch (format) {
+      case 'json':
+        content = JSON.stringify({
+          dataset: {
+            name: dataset.name,
+            type: dataset.dataset_type,
+            created_at: dataset.created_at,
+            total_examples: dataset.total_examples
+          },
+          examples: exportData
+        }, null, 2);
+        mimeType = 'application/json';
+        filename = `${dataset.name.replace(/[^a-zA-Z0-9]/g, '_')}.json`;
+        break;
+        
+      case 'jsonl':
+        content = exportData.map(example => JSON.stringify(example)).join('\n');
+        mimeType = 'application/jsonl';
+        filename = `${dataset.name.replace(/[^a-zA-Z0-9]/g, '_')}.jsonl`;
+        break;
+        
+      case 'csv':
+        const headers = ['input', 'output', 'quality_score', 'metadata'];
+        const csvRows = exportData.map(example => [
+          `"${example.input.replace(/"/g, '""')}"`,
+          `"${example.output.replace(/"/g, '""')}"`,
+          example.quality_score,
+          `"${JSON.stringify(example.metadata).replace(/"/g, '""')}"`
+        ]);
+        content = [headers.join(','), ...csvRows.map(row => row.join(','))].join('\n');
+        mimeType = 'text/csv';
+        filename = `${dataset.name.replace(/[^a-zA-Z0-9]/g, '_')}.csv`;
+        break;
+        
+      default:
+        return c.json({ success: false, error: 'Invalid format' }, 400);
+    }
+    
+    return new Response(content, {
+      headers: {
+        'Content-Type': mimeType,
+        'Content-Disposition': `attachment; filename="${filename}"`,
+        'Access-Control-Allow-Origin': '*'
+      }
+    });
+  } catch (error) {
+    console.error('Error exporting dataset:', error);
+    return c.json({ success: false, error: 'Failed to export dataset' }, 500);
+  }
+});
+
 // Get AI providers
 app.get('/api/ai/providers', async (c) => {
   try {
@@ -403,8 +560,6 @@ app.get('/api/ai/providers', async (c) => {
 // Get available prompt templates
 app.get('/api/templates', async (c) => {
   try {
-    const { DatasetGenerator } = await import('../app/lib/dataset-generator');
-    
     const aiService = c.get('ai') as AIServiceManager;
     const generator = new DatasetGenerator(aiService);
     const templates = generator.getAvailableTemplates();
@@ -420,8 +575,6 @@ app.get('/api/templates', async (c) => {
 app.get('/api/templates/:type', async (c) => {
   try {
     const type = c.req.param('type') as any;
-    const { DatasetGenerator } = await import('../app/lib/dataset-generator');
-    
     const aiService = c.get('ai') as AIServiceManager;
     const generator = new DatasetGenerator(aiService);
     const templates = generator.getTemplatesByType(type);
@@ -432,6 +585,165 @@ app.get('/api/templates/:type', async (c) => {
     return c.json({ success: false, error: 'Failed to fetch templates' }, 500);
   }
 });
+
+// Demo dataset generation (no API keys required)
+app.post('/api/projects/:projectId/documents/:documentId/generate-demo', async (c) => {
+  try {
+    const projectId = c.req.param('projectId');
+    const documentId = c.req.param('documentId');
+    const { templateId } = await c.req.json();
+    
+    if (!templateId) {
+      return c.json({ success: false, error: 'Template ID is required' }, 400);
+    }
+
+    const documentRepo = c.get('documentRepo') as DocumentRepository;
+    const chunkRepo = c.get('chunkRepo') as DocumentChunkRepository;
+    const datasetRepo = c.get('datasetRepo') as DatasetRepository;
+    const exampleRepo = c.get('exampleRepo') as DatasetExampleRepository;
+    
+    // Get document
+    const document = await documentRepo.findById(documentId);
+    if (!document || document.project_id !== projectId) {
+      return c.json({ success: false, error: 'Document not found' }, 404);
+    }
+
+    // Get document chunks
+    const chunks = await chunkRepo.findByDocumentId(documentId);
+    if (chunks.length === 0) {
+      return c.json({ success: false, error: 'No chunks found for document' }, 400);
+    }
+
+    // Create dataset generator for template info
+    const aiService = c.get('ai') as AIServiceManager;
+    const generator = new DatasetGenerator(aiService);
+    const template = generator.getAvailableTemplates().find(t => t.id === templateId);
+
+    // Generate demo examples
+    const demoExamples = generateDemoExamples(templateId, document, chunks);
+
+    // Create dataset record
+    const dataset = await datasetRepo.create({
+      project_id: projectId,
+      name: `DEMO: Generated from ${document.original_filename}`,
+      description: `Demo dataset using ${template?.name || templateId} template (no AI API used)`,
+      dataset_type: template?.type || 'qa',
+      source_documents: [documentId],
+      generation_config: {
+        ai_provider: 'demo',
+        model: 'demo-model',
+        temperature: 0.7,
+        max_tokens: 1500,
+        examples_per_chunk: demoExamples.length / chunks.length,
+        prompt_template: templateId
+      },
+      status: 'completed',
+      total_examples: demoExamples.length,
+      generated_examples: demoExamples.length,
+      quality_score: 0.85 // Demo quality score
+    });
+
+    // Save demo examples
+    const exampleData = demoExamples.map(example => ({
+      dataset_id: dataset.id,
+      source_chunk_id: example.sourceChunkId,
+      input: example.input,
+      output: example.output,
+      example_type: example.type,
+      quality_score: example.qualityScore,
+      validation_status: 'pending' as const,
+      metadata: example.metadata
+    }));
+
+    await exampleRepo.createBatch(exampleData);
+
+    return c.json({ 
+      success: true, 
+      data: {
+        dataset,
+        statistics: {
+          totalExamples: demoExamples.length,
+          processedChunks: chunks.length,
+          failedChunks: 0,
+          averageQualityScore: 0.85,
+          processingTimeMs: 2500, // Simulated time
+          tokensUsed: 0,
+          estimatedCost: 0
+        },
+        examples: demoExamples.slice(0, 5) // Return first 5 examples as preview
+      }
+    });
+
+  } catch (error) {
+    console.error('Error generating demo dataset:', error);
+    return c.json({ success: false, error: 'Failed to generate demo dataset' }, 500);
+  }
+});
+
+// Helper function to generate demo examples
+function generateDemoExamples(templateId: string, document: any, chunks: any[]) {
+  const examples: any[] = [];
+  
+  chunks.forEach((chunk, index) => {
+    if (templateId === 'qa_generation') {
+      examples.push({
+        id: `demo-${index}-1`,
+        type: 'qa',
+        input: `What is the main topic discussed in this section?`,
+        output: `This section discusses SAML configuration mapping between NetScaler Identity Provider and Splunk Service Provider, focusing on proper Entity ID configuration and authentication requirements.`,
+        metadata: { questionType: 'factual', confidence: 0.9 },
+        sourceChunkId: chunk.id,
+        qualityScore: 0.9
+      });
+      examples.push({
+        id: `demo-${index}-2`, 
+        type: 'qa',
+        input: `How should the Entity IDs be configured for proper SAML authentication?`,
+        output: `The Entity IDs must match exactly between systems. NetScaler's Issuer Name should be set to 'https://testihuolto.pohde.fi' and Splunk's Issuer ID must use the same value. This exact matching is critical for successful authentication.`,
+        metadata: { questionType: 'explanatory', confidence: 0.85 },
+        sourceChunkId: chunk.id,
+        qualityScore: 0.85
+      });
+    } else if (templateId === 'instruction_following') {
+      examples.push({
+        id: `demo-${index}-1`,
+        type: 'instruction',
+        input: `Configure SAML Identity Provider settings in NetScaler`,
+        output: `1. Access NetScaler management interface\n2. Navigate to SAML IdP Profile settings\n3. Set Issuer Name to 'https://testihuolto.pohde.fi'\n4. Configure Service Provider ID as 'https://testiportti.pohde.fi'\n5. Verify settings match Splunk SP configuration\n6. Save and test the configuration`,
+        metadata: { taskType: 'procedure', difficulty: 'intermediate' },
+        sourceChunkId: chunk.id,
+        qualityScore: 0.88
+      });
+    } else if (templateId === 'summarization') {
+      examples.push({
+        id: `demo-${index}-1`,
+        type: 'summarization',
+        input: `Summarize the following text (brief summary):`,
+        output: `SAML configuration mapping guide for NetScaler IdP and Splunk SP integration.`,
+        metadata: { summaryType: 'brief', keyPoints: ['SAML', 'NetScaler', 'Splunk'] },
+        sourceChunkId: chunk.id,
+        qualityScore: 0.8
+      });
+    } else {
+      // Character/persona
+      examples.push({
+        id: `demo-${index}-1`,
+        type: 'character',
+        input: `I'm having trouble with SAML authentication. What should I check?`,
+        output: `First, verify that your Entity IDs match exactly between NetScaler and Splunk. The NetScaler Issuer Name and Splunk Issuer ID must both be 'https://testihuolto.pohde.fi'. Even a small typo will cause authentication failures. This is the most common issue I encounter.`,
+        metadata: { 
+          scenario: 'SAML troubleshooting',
+          traitsDemonstrated: ['methodical', 'helpful'],
+          characterProfile: { name: 'SAML Expert', expertise: ['authentication', 'configuration'] }
+        },
+        sourceChunkId: chunk.id,
+        qualityScore: 0.82
+      });
+    }
+  });
+  
+  return examples;
+}
 
 // Generate dataset from document
 app.post('/api/projects/:projectId/documents/:documentId/generate', async (c) => {
@@ -461,9 +773,19 @@ app.post('/api/projects/:projectId/documents/:documentId/generate', async (c) =>
       return c.json({ success: false, error: 'No chunks found for document' }, 400);
     }
 
-    // Import and create dataset generator
-    const { DatasetGenerator } = await import('../app/lib/dataset-generator');
+    // Create dataset generator
     const aiService = c.get('ai') as AIServiceManager;
+    
+    // Check if any AI providers are available
+    const availableProviders = aiService.getAvailableProviders();
+    if (availableProviders.length === 0) {
+      return c.json({ 
+        success: false, 
+        error: 'No AI providers configured. Please set OPENAI_API_KEY or ANTHROPIC_API_KEY environment variables, or use Demo Mode instead.',
+        details: 'Live AI generation requires API keys to be configured'
+      }, 400);
+    }
+    
     const generator = new DatasetGenerator(aiService);
 
     // Generate dataset
@@ -539,16 +861,26 @@ app.post('/api/projects/:projectId/documents/:documentId/generate', async (c) =>
   }
 });
 
-// Catch-all for React Router
-app.get("*", (c) => {
-  const requestHandler = createRequestHandler(
-    () => import("virtual:react-router/server-build"),
-    import.meta.env.MODE,
-  );
+// Catch-all for React Router (disabled for API-only mode)
+// app.get("*", (c) => {
+//   const requestHandler = createRequestHandler(
+//     () => import("virtual:react-router/server-build"),
+//     import.meta.env.MODE,
+//   );
 
-  return requestHandler(c.req.raw, {
-    cloudflare: { env: c.env, ctx: c.executionCtx },
-  });
+//   return requestHandler(c.req.raw, {
+//     cloudflare: { env: c.env, ctx: c.executionCtx },
+//   });
+// });
+
+// Simple catch-all for API testing
+app.get("*", (c) => {
+  return c.json({ 
+    success: false, 
+    error: "API endpoint not found",
+    path: c.req.path,
+    method: c.req.method
+  }, 404);
 });
 
 export default app;

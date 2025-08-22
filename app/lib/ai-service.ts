@@ -267,12 +267,23 @@ export class AIServiceManager {
    * Initialize providers with API keys
    */
   initializeProviders(env: { OPENAI_API_KEY?: string; ANTHROPIC_API_KEY?: string }) {
+    console.log('Initializing AI providers...', {
+      hasOpenAI: !!env.OPENAI_API_KEY,
+      hasAnthropic: !!env.ANTHROPIC_API_KEY
+    });
+
     if (env.OPENAI_API_KEY) {
       this.providers.set('openai', new OpenAIProvider(env.OPENAI_API_KEY));
+      console.log('OpenAI provider initialized');
     }
 
     if (env.ANTHROPIC_API_KEY) {
       this.providers.set('anthropic', new AnthropicProvider(env.ANTHROPIC_API_KEY));
+      console.log('Anthropic provider initialized');
+    }
+
+    if (this.providers.size === 0) {
+      console.warn('No AI providers initialized - no API keys found in environment');
     }
   }
 

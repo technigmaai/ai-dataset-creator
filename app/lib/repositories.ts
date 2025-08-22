@@ -176,12 +176,6 @@ class DocumentChunkRepository extends BaseRepository {
   async deleteByDocumentId(documentId: string): Promise<void> {
     await this.db.execute('DELETE FROM document_chunks WHERE document_id = ?', [documentId]);
   }
-
-  async createBatch(chunksData: Omit<DocumentChunk, 'id' | 'created_at'>[]): Promise<void> {
-    for (const chunkData of chunksData) {
-      await this.create(chunkData);
-    }
-  }
 }
 
 /**
@@ -360,6 +354,10 @@ class DatasetExampleRepository extends BaseRepository {
       'UPDATE dataset_examples SET validation_status = ?, quality_score = ?, updated_at = ? WHERE id = ?',
       [status, qualityScore || null, new Date().toISOString(), id]
     );
+  }
+
+  async delete(id: string): Promise<boolean> {
+    return await super.delete('dataset_examples', id);
   }
 
   async getQualityStats(datasetId: string): Promise<{
